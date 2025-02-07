@@ -22,9 +22,7 @@ library(recount3)
 library(iSEE)
 library("edgeR")
 library("ggplot2")
-
-
-
+library("limma")
 
 ## Explore available mouse datasets in recount3
 mouse_projects <- available_projects("mouse")
@@ -49,36 +47,23 @@ colData(rse_gene_SRP193734)[
   grepl("^sra_attribute", colnames(colData(rse_gene_SRP193734)))
 ]
 
-## Inspect the atrributes of the samples
+## Inspect the attributes of the samples
 rse_gene_SRP193734$sra.sample_attributes
-
-## [1] "selected line;;High Drinker|Sex;;male|source_name;;High Drinker_Nucleus Accumbens|tissue;;Dissected Tissue (Brain) - Nucleus Accumbens"
-## [2] "selected line;;High Drinker|Sex;;male|source_name;;High Drinker_Nucleus Accumbens|tissue;;Dissected Tissue (Brain) - Nucleus Accumbens"
-## [3] "selected line;;High Drinker|Sex;;male|source_name;;High Drinker_Nucleus Accumbens|tissue;;Dissected Tissue (Brain) - Nucleus Accumbens"
-## [4] "selected line;;High Drinker|Sex;;male|source_name;;High Drinker_Nucleus Accumbens|tissue;;Dissected Tissue (Brain) - Nucleus Accumbens"
-## [5] "selected line;;High Drinker|Sex;;male|source_name;;High Drinker_Nucleus Accumbens|tissue;;Dissected Tissue (Brain) - Nucleus Accumbens"
-## ...
 
 ## Get the data in the columns
 names(colData(rse_gene_SRP193734))
 
-## SELECTING OUR DATA
 ## Casting the data of interest (for a better manipulation)
 rse_gene_SRP193734$sra_attribute.selected_line <- factor(rse_gene_SRP193734$sra_attribute.selected_line)
+rse_gene_SRP193734$sra_attribute.tissue <- factor(rse_gene_SRP193734$sra_attribute.tissue)
 
 ## Check more information about our data
-levels(rse_gene_SRP193734$sra_attribute.selected_line)
 summary(rse_gene_SRP193734$sra_attribute.selected_line)
-
-## Casting of the tissue variable
-colData(rse_gene_SRP193734)$sra_attribute.tissue <- factor(colData(rse_gene_SRP193734)$sra_attribute.tissue)
-
-## Visualize our actual data
-rse_gene_SRP193734$sra.sample_attributes
+summary(rse_gene_SRP193734$sra_attribute.tissue)
 
 ## Resume of our variable of interest
 summary(as.data.frame(colData(rse_gene_SRP193734)[
-  , grepl("^sra_attribute.*(selected_line|tissu)", colnames(colData(rse_gene_SRP193734)))
+  , grepl("^sra_attribute.*(selected_line|tissue)", colnames(colData(rse_gene_SRP193734)))
 ]))
 
 
@@ -93,7 +78,7 @@ with(colData(rse_gene_SRP193734), plot(assigned_gene_prop, sra_attribute.tissue)
 rse_gene_SRP193734_unfiltred <- rse_gene_SRP193734
 
 ## Check if there is a difference between the groups
-with(colData(rse_gene_SRP193734), tapply(assigned_gene_prop, sra_attribute.selected_line, summary))
+with(colData(rse_gene_SRP193734), tapply(assigned_gene_prop, sra_attribute.selected_line, sra_attribute.tissue, summary))
 
 ## Save only the data that pass the quality control
 hist(rse_gene_SRP193734$assigned_gene_prop)
@@ -145,5 +130,34 @@ ggplot(
 ## In case of error, we can use the following code to fix it
 dev.off()
 
+## Implement the statistical model
+mod <- model.matrix(~ sra_attribute.selected_line + sra_attribute.tissue,
+                    data = colData(rse_gene_SRP193734))
+colnames(mod)
+
+## Analysis of the data
+
+vGene <- voom(dge, mod, plot = TRUE)
+
+eb_result <- eBayes(lmFit(vGene))
+
+de_results <- topTable(
+  eb_result,
+  coef = 2,
+  number = nrow(rse_gene_SRP193734),
+  sort.by = "none"
+)
+dim(de_results)
+head(de_results)
+
+## Differential expression analysis
+table(de_results$adj.P.Val < 0.05)
+
+## Visualization of the results
+plotMA(eb_result, coef = 2)
+
+## Volcano plot
+volcanoplot(eb_result, coef = 2, highlight = 3, names = de_results$gene_name)
+#de_results[de_results$gene_name %in% ]...
 
 
