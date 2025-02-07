@@ -20,6 +20,11 @@
 ## Load the libraries
 library(recount3)
 library(iSEE)
+library("edgeR")
+library("ggplot2")
+
+
+
 
 ## Explore available mouse datasets in recount3
 mouse_projects <- available_projects("mouse")
@@ -65,10 +70,9 @@ rse_gene_SRP193734$sra_attribute.selected_line <- factor(rse_gene_SRP193734$sra_
 levels(rse_gene_SRP193734$sra_attribute.selected_line)
 summary(rse_gene_SRP193734$sra_attribute.selected_line)
 
-## As a matter of interest, we will filter the data to only include samples from the selected section of the brain (Nucleus Accumbens)
-rse_gene_SRP193734 <- rse_gene_SRP193734[, rse_gene_SRP193734$sra_attribute.tissue == "Dissected Tissue (Brain) - Nucleus Accumbens"]
 ## Casting of the tissue variable
 colData(rse_gene_SRP193734)$sra_attribute.tissue <- factor(colData(rse_gene_SRP193734)$sra_attribute.tissue)
+
 ## Visualize our actual data
 rse_gene_SRP193734$sra.sample_attributes
 
@@ -76,5 +80,70 @@ rse_gene_SRP193734$sra.sample_attributes
 summary(as.data.frame(colData(rse_gene_SRP193734)[
   , grepl("^sra_attribute.*(selected_line|tissu)", colnames(colData(rse_gene_SRP193734)))
 ]))
+
+
+## CONTROL OF THE DATA QUALITY
+
+rse_gene_SRP193734$assigned_gene_prop <- rse_gene_SRP193734$recount_qc.gene_fc_count_all.assigned / rse_gene_SRP193734$recount_qc.gene_fc_count_all.total
+summary(rse_gene_SRP193734$assigned_gene_prop)
+with(colData(rse_gene_SRP193734), plot(assigned_gene_prop, sra_attribute.selected_line))
+with(colData(rse_gene_SRP193734), plot(assigned_gene_prop, sra_attribute.tissue))
+
+## Save the original data just in case
+rse_gene_SRP193734_unfiltred <- rse_gene_SRP193734
+
+## Check if there is a difference between the groups
+with(colData(rse_gene_SRP193734), tapply(assigned_gene_prop, sra_attribute.selected_line, summary))
+
+## Save only the data that pass the quality control
+hist(rse_gene_SRP193734$assigned_gene_prop)
+table(rse_gene_SRP193734$assigned_gene_prop < 0.3)
+### ----------------------
+### FALSE
+### 47
+### ----------------------
+
+rse_gene_SRP193734 <- rse_gene_SRP193734[, rse_gene_SRP193734$assigned_gene_prop > 0.3]
+
+## Calculate the expression levels of the genes ----- using the counts --------
+
+gene_means <- rowMeans(assay(rse_gene_SRP193734, "counts"))
+summary(gene_means)
+
+## Delete genes
+rse_gene_SRP193734 <- rse_gene_SRP193734[gene_means > 0.1, ]
+
+## Defining the finals dimension
+dim(rse_gene_SRP193734)
+
+## Percentage of genes that we keep
+round(nrow(rse_gene_SRP193734) / nrow(rse_gene_SRP193734_unfiltred) * 100, 2)
+
+
+## NORMALIZE MY DATA
+
+dge <- DGEList(
+  counts = assay(rse_gene_SRP193734, "counts"),
+  genes = rowData(rse_gene_SRP193734)
+)
+
+dge <- calcNormFactors(dge)
+
+
+## Explore the data
+ggplot(
+  as.data.frame(colData(rse_gene_SRP193734)),
+  aes(y = assigned_gene_prop, x = sra_attribute.selected_line, fill = sra_attribute.selected_line)
+) +
+  geom_boxplot() +
+  theme_bw(base_size = 20) +
+  ylab("Assigned gene proportion") +
+  xlab("Selected line") +
+  ggtitle("Proportion of Assigned Reads by Selected Line") +
+  scale_fill_manual(values = c("High Drinker" = "red", "Low Drinker" = "blue"))
+
+## In case of error, we can use the following code to fix it
+dev.off()
+
 
 
