@@ -72,16 +72,14 @@ summary(as.data.frame(colData(rse_gene_SRP193734)[
 # Section 2: Quality control and data cleaning
 # ==============================================================================
 
+## Save a copy of the data before the quality control
+rse_gene_SRP193734_unfiltred <- rse_gene_SRP193734
+
 ## Calculate the proportion of assigned genes
 rse_gene_SRP193734$assigned_gene_prop <- rse_gene_SRP193734$recount_qc.gene_fc_count_all.assigned /
   rse_gene_SRP193734$recount_qc.gene_fc_count_all.total
 summary(rse_gene_SRP193734$assigned_gene_prop)
 
-## Visualize the relationship between the assigned gene proportion and the selected line and tissue
-#with(colData(rse_gene_SRP193734),
-#     plot(assigned_gene_prop, sra_attribute.selected_line))
-#with(colData(rse_gene_SRP193734),
-#    plot(assigned_gene_prop, sra_attribute.tissue))
 
 ## Check if there is a difference between the groups
 with(colData(rse_gene_SRP193734), aggregate(assigned_gene_prop,
@@ -103,7 +101,7 @@ rse_gene_SRP193734 <- rse_gene_SRP193734[, rse_gene_SRP193734$assigned_gene_prop
 gene_means <- rowMeans(assay(rse_gene_SRP193734, "counts"))
 summary(gene_means)
 
-## Delete genes
+## Delete genes with low expression levels (under 0.1)
 rse_gene_SRP193734 <- rse_gene_SRP193734[gene_means > 0.1, ]
 
 ## Defining the finals dimension
@@ -178,7 +176,7 @@ de_results[de_results$gene_name %in% c("Gm9855", "Arhgef15", "Gm1829"), ]
 
 
 # ==============================================================================
-# Section 5: Visualization of the final results
+# Section 5: Visualization of the results
 # ==============================================================================
 
 ## Extract the values of the genes of interest
