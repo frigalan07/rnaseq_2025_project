@@ -3,6 +3,12 @@ title: "Differential Gene Expression Analysis in Mouse Models with Varying Metha
 author: "Frida Galán"
 date: "`r Sys.Date()`"
 output:
+  html_document:
+    toc: yes
+    toc_depth: 5
+    toc_float: yes
+    theme: cosmo
+    code_folding: hide
   pdf_document:
     toc: yes
     toc_depth: 5
