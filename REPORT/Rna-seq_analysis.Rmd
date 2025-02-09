@@ -1,0 +1,309 @@
+---
+title: "Differential Gene Expression Analysis in Mouse Models with Varying Methamphetamine Consumption"
+author: "Frida Galán"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 5
+bibliography: "../REFERENCES/references.bib"
+---
+
+# Introduction
+
+Drug addition, also called substance use disorder, is a disease that affects a person's brain and behavior and leads to an inability to control the use of a legal or illegal drug or medicine.[@mayoclinic_drug_addiction]
+Substance use disorders pose a significant public health challenge, with far-reaching consequences for individuals, families, and society. The biological mechanisms underlying addiction are multifaceted, involving genetic, epigenetic, and environmental factors that interact to influence vulnerability and progression of the disorder.
+A critical aspect of addiction research is understanding the molecular and neurobiological changes that occur in the brain's reward circuitry.
+For addiction research, in-depth transcriptome analysis entails study of multiple brain regions comprising the addiction neurocircuitry, as well as the temporal patterns of drug intake, withdrawal, and relapse.[@pmc6338210]
+
+Modern large-scale molecular methods, including RNA-sequencing (RNA-Seq), have been extensively applied to alcohol-related disease traits, but rarely to risk for methamphetamine (MA) addiction.[@Hitzemann2019]
+Methamphetamine (N-methylamphetamine) is a potent central nervous system (CNS) stimulant that is mainly used as a recreational or performance-enhancing drug and less commonly as a second-line treatment for attention deficit hyperactivity disorder (ADHD). METH has powerful addictive properties and, therefore, has devastating effects on health and other aspects of life of the people who abuse it. [@Moszczynska2017]
+
+The data used in this analysis originates from a study by Hitzemann et al. [@Hitzemann2019], which employed RNA-sequencing to investigate gene expression profiles in mice selectively bred for high and low voluntary MA intake. The study focused on three key brain regions—the NAc, PFC, and VMB—providing valuable insights into the transcriptional changes associated with MA consumption. By leveraging this dataset, our analysis aimed to identify differentially expressed genes in mice bred for high and low methamphetamine consumption.
+
+# Metodology
+
+## Section 1: Data loading and pre-processing
+
+In this part, since we're usign recount3 to get the data from the study, we will load the library and get the data from the study.
+To do the rest of the analysis, we will need to create a RangedSummarizedExperiment (RSE) object, which is a Bioconductor class that stores genomic data in a convenient format. This object will contain the raw counts for each gene in the dataset, as well as metadata about the samples and genes.
+```{r load_libraries, echo=TRUE, message=FALSE}
+## Load the library
+library(recount3)
+
+## Explore available mouse datasets in recount3
+mouse_projects <- available_projects("mouse")
+
+## Get the project of interest (in this case SRP193734 )
+project_info <- subset(
+  mouse_projects,
+  project == "SRP193734" & project_type == "data_sources"
+)
+
+## Create a RangedSummarizedExperiment (RSE) object
+rse_gene_SRP193734 <- create_rse(project_info)
+
+## Convert raw counts to read counts 
+assay(rse_gene_SRP193734, "counts") <- compute_read_counts(rse_gene_SRP193734)
+```
+
+The next step is to explore the data to see what we're working with 
+```{r results='hide'}
+
+## Expand the attributes of the samples
+rse_gene_SRP193734 <- expand_sra_attributes(rse_gene_SRP193734)
+
+colData(rse_gene_SRP193734)[
+  ,
+  grepl("^sra_attribute", colnames(colData(rse_gene_SRP193734)))
+]
+
+### DataFrame with 143 rows and 8 columns
+###           sra_attribute.selected_line sra_attribute.Sex
+###                              <factor>       <character>
+### SRR8949519                High Drinker              male
+### SRR8949520                High Drinker              male
+### SRR8949521                High Drinker              male
+### ...
+### SRR8949659                 Low Drinker              male
+### SRR8949660                 Low Drinker              male
+###           sra_attribute.source_name
+###                         <character>
+### SRR8949519    High Drinker_Nucleus..
+### SRR8949520    High Drinker_Nucleus..
+### ...
+### SRR8949657    Low Drinker_Pre-Fron..
+### SRR8949658    Low Drinker_Pre-Fron..
+### ...
+
+
+## Inspect the attributes of the samples
+rse_gene_SRP193734$sra.sample_attributes
+
+### [1] "selected line;;High Drinker|Sex;;male|source_name;;High Drinker_Nucleus
+### Accumbens|tissue;;Dissected Tissue (Brain) - Nucleus Accumbens"  
+### [2] "selected line;;High Drinker|Sex;;male|source_name;;High Drinker_Nucleus 
+### Accumbens|tissue;;Dissected Tissue (Brain) - Nucleus Accumbens"  
+### ...
+### [142] "selected line;;Low Drinker|Sex;;male|source_name;;Low Drinker_Pre-
+### Frontal Cortex|tissue;;Dissected Tissue (Brain) - Pre-Frontal Cortex"  
+### [143] "selected line;;Low Drinker|Sex;;male|source_name;;Low Drinker_Pre-
+### Frontal Cortex|tissue;;Dissected Tissue (Brain) - Pre-Frontal Cortex" 
+
+
+## Get the data in the columns
+names(colData(rse_gene_SRP193734))
+
+### [1] "rail_id"                                                           
+### [2] "external_id"                                                       
+### [3] "study"                                                             
+### [4] "sra.sample_acc.x"                                                  
+### ...
+### [183] "sra_attribute.selected_line"                                        
+### [184] "sra_attribute.Sex"                                                 
+### [185] "sra_attribute.source_name"                                         
+### [186] "sra_attribute.tissue"      
+
+```
+
+Finally, we are going to manipulate the data to make it more convenient to work with
+
+```{r}
+## Casting the data of interest (for a better manipulation), since all mouse are male, the sex isn't relevant for the analysis
+rse_gene_SRP193734$sra_attribute.selected_line <- factor(rse_gene_SRP193734$sra_attribute.selected_line)
+rse_gene_SRP193734$sra_attribute.tissue <- factor(rse_gene_SRP193734$sra_attribute.tissue)
+
+## Check more information about our data
+summary(rse_gene_SRP193734$sra_attribute.selected_line)
+summary(rse_gene_SRP193734$sra_attribute.tissue)
+
+## Resume of our variable of interest
+summary(as.data.frame(colData(rse_gene_SRP193734)[
+  , grepl("^sra_attribute.*(selected_line|tissue)", colnames(colData(rse_gene_SRP193734)))
+]))
+
+```
+
+## Section 2: Quality control and data cleaning
+
+For this step, firts we're going to calculate the proportion of assigned genes in the dataset. This metric provides an indication of the quality of the sequencing data and the efficiency of the read alignment process. A high proportion of assigned genes suggests that a large fraction of the reads were successfully mapped to known genes, which is essential for downstream analyses such as differential gene expression analysis.
+```{r}
+## Save a copy of the data before the quality control
+rse_gene_SRP193734_unfiltred <- rse_gene_SRP193734
+
+## Calculate the proportion of assigned genes
+rse_gene_SRP193734$assigned_gene_prop <- rse_gene_SRP193734$recount_qc.gene_fc_count_all.assigned /
+  rse_gene_SRP193734$recount_qc.gene_fc_count_all.total
+#Get a summary of the assigned gene proportion
+summary(rse_gene_SRP193734$assigned_gene_prop)
+```
+
+Secondly, we're going to check if there are significant differences 
+```{r}
+## Check if there is a difference between the groups
+with(colData(rse_gene_SRP193734), aggregate(assigned_gene_prop,
+                                            by = list(sra_attribute.selected_line, sra_attribute.tissue),
+                                            FUN = summary)
+     )
+```
+
+Now, we're going to filter the data to remove low-quality samples. We're going to eliminate any sample with an assigned gene proportion below 0.3, as these samples may have poor sequencing quality and could introduce noise into the analysis.
+
+```{r}
+hist(rse_gene_SRP193734$assigned_gene_prop)
+table(rse_gene_SRP193734$assigned_gene_prop < 0.3)
+```
+
+```{r}
+rse_gene_SRP193734 <- rse_gene_SRP193734[, rse_gene_SRP193734$assigned_gene_prop > 0.3]
+```
+
+In this step, we're going to calculate the expression levels of the genes by using the expression count. By using the function 'rowMeans' helps us to calculate the average expression level of each gene across all samples in the dataset. This metric provides an indication of the gene's overall expression level.
+
+```{r}
+## Calculate the expression levels of the genes ----- using the counts --------
+gene_means <- rowMeans(assay(rse_gene_SRP193734, "counts"))
+summary(gene_means)
+
+## Delete genes with low expression levels (under 0.1)
+rse_gene_SRP193734 <- rse_gene_SRP193734[gene_means > 0.1, ]
+
+## Defining the finals dimension
+dim(rse_gene_SRP193734)
+
+## Percentage of genes that we keep
+round(nrow(rse_gene_SRP193734) / nrow(rse_gene_SRP193734_unfiltred) * 100, 2)
+
+```
+
+## Section 3: Normalization of the data
+Normalize the data is a crucial step in RNA-Seq analysis, as it adjusts for differences in sequencing depth and other technical factors that can confound downstream analyses. 
+```{r echo=TRUE, message=FALSE}
+## Load the libraries
+library(edgeR)
+library(ggplot2)
+```
+
+```{r}
+## Normalize the data
+dge <- DGEList(
+  counts = assay(rse_gene_SRP193734, "counts"),
+  genes = rowData(rse_gene_SRP193734)
+)
+
+dge <- calcNormFactors(dge)
+
+## Visualize the data after normalization
+ggplot(as.data.frame(colData(rse_gene_SRP193734)),
+       aes(x = sra_attribute.selected_line, y = assigned_gene_prop, fill = sra_attribute.tissue)) +
+  geom_boxplot() +
+  labs(x = "Mouse selected line", y = "Assigned gene proportion", fill = "Cerebral tissue") +
+  theme_minimal()
+```
+
+## Section 4: Differential expression analysis
+
+In this step, we're going to perform a differential gene expression analysis to identify genes that are differentially expressed between mice bred for high and low methamphetamine consumption. 
+
+```{r}
+## Load the library 
+library("limma")
+
+## Implement the statistical model
+mod <- model.matrix(~ sra_attribute.selected_line + sra_attribute.tissue,
+                    data = colData(rse_gene_SRP193734))
+colnames(mod)
+
+## Visualize the matrix
+vd <- ExploreModelMatrix::VisualizeDesign(
+  sampleData = colData(rse_gene_SRP193734),
+  designFormula = ~ sra_attribute.selected_line + sra_attribute.tissue,
+  textSizeFitted = 4
+)
+
+## Aply the voom transformation (to stabilize the variance)
+vGene <- voom(dge, mod, plot = TRUE)
+
+## Fit the linear model for each gene and perform the empirical Bayes moderation
+eb_result <- eBayes(lmFit(vGene))
+
+## Extract the results, sorting the genes without any particular order
+de_results <- topTable(
+  eb_result,
+  coef = 2,
+  number = nrow(rse_gene_SRP193734),
+  sort.by = "none"
+)
+
+## Inspect the dimensions and the first rows of the results
+dim(de_results)
+head(de_results, n = 3)
+
+## Count the genes with adjusted p-value < 0.05 (significant genes)
+table(de_results$adj.P.Val < 0.05)
+
+## Visualization of the changes in the differential expression
+plotMA(eb_result, coef = 2)
+
+## Volcano plot highlighting the top 3 genes more significant
+volcanoplot(eb_result, coef = 2, highlight = 3, names = de_results$gene_name)
+de_results[de_results$gene_name %in% c("Gm9855", "Arhgef15", "Gm1829"), ]
+
+```
+
+
+## Section 5: Visualization of the results
+Finally, here we're creating a heatmap with the expression values of the top 50 genes that are differentially expressed between mice bred for high and low methamphetamine consumption. This visualization provides a comprehensive overview of the gene expression patterns across the samples and highlights the genes that are most relevant to the study.
+
+```{r}
+
+## Load the library
+library("pheatmap")
+
+## Extract the values of the genes of interest
+exprs_heatmap <- vGene$E[rank(de_results$adj.P.Val) <= 50, ]
+
+## Create a table with the information of the samples
+df <- as.data.frame(colData(rse_gene_SRP193734))
+
+# Subset the columns of interest
+df <- df[, c("sra_attribute.selected_line", "sra_attribute.tissue")]
+colnames(df) <- c("Selected line", "Tissue")
+
+## Create a heatmap with the expression values of the top 50 genes
+pheatmap(exprs_heatmap,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         show_rownames = FALSE,
+         show_colnames = FALSE,
+         annotation_col = df
+         )
+```
+
+
+# Interpretation of the results
+
+In the quality control and data cleaning section, the proportion of assigned genes in the samples was relatively high (between 0.76 and 0.82). This indicates that the majority of reads were successfully mapped to known genes, suggesting that the sequencing data is of good quality. No samples were of low quality, as none fell below the threshold of 0.3; therefore, no samples were removed from the dataset. Additionally, genes with very low expression levels (below 0.1) were filtered out, resulting in the retention of approximately 65.87% of the genes. This filtering step helps focus on the most informative genes and reduces noise in the analysis.
+
+The voom transformation was applied to stabilize the variance of the data. The graph shows that the relationship between variance and mean follows the expected trend, and a linear model was fitted for each gene to perform empirical Bayes moderation. A total of 4,062 genes were found to be differentially expressed between mice bred for high and low methamphetamine consumption, with an adjusted p-value < 0.05. The volcano plot highlights the top three most significant genes in the analysis: Gm9855, Arhgef15, and Gm1829.
+
+Finally, the heatmap visualization of the top 50 differentially expressed genes reveals clear differences between the high and low methamphetamine consumption groups across the three brain regions analyzed (NAc, PFC, and VMB).
+
+# Discussion
+The genes identified in this analysis provide valuable insights into the molecular mechanisms underlying methamphetamine consumption in mice. The brain regions studied (NAc, PFC, and VMB) are known to play a critical role in reward circuitry and addiction-related behaviors. The differential expression of genes in these regions may contribute to the observed differences in methamphetamine consumption between the high and low consumption groups. Thus, the results support the idea that susceptibility to methamphetamine addiction involves molecular reconfiguration in brain regions associated with reward and addiction-related behaviors.
+
+*Arhgef15* is a gene that encodes a Rho guanine nucleotide exchange factor. Rho GTPases play a fundamental role in numerous cellular processes initiated by extracellular stimuli that act through G protein-coupled receptors. This gene encodes a protein that functions as a specific guanine nucleotide exchange factor for RhoA and interacts with ephrin A4 in vascular smooth muscle cells. Two alternatively spliced transcript variants encoding the same protein have been identified for this gene [@NCBI_Gene_22899].
+
+*Gm1829* (now *Gm6365*) [@NCBI_Gene_Gm1829] and *Gm9855* (thymine DNA glycosylase) [@NCBI_Gene_Gm9855] are both pseudogenes and remain poorly characterized. These findings could serve as a starting point for further research to elucidate the roles of these genes in methamphetamine consumption and addiction.
+
+# Conclusion
+In conclusion, this analysis identified 4,062 genes differentially expressed between mice bred for high and low methamphetamine consumption. The top three most significant genes in the analysis—Gm9855, Arhgef15, and Gm1829—are established as potential candidates for further research into the molecular mechanisms underlying methamphetamine addiction.
+
+
+
+
+
+
+
+
+# References
