@@ -1,21 +1,21 @@
 ## Code
 
+################################################################################
 ## Author: Frida Galan Hernandez
 ## Email: fridagh@lcg.unam.mx
-## Date: 2021-09-30
+## Date: 2025-02-09
 
-## Description: This code implements the workflow for analyzing data from the paper "Regional Analysis of the Brain
-## Transcriptome in Mice Bred for High and Low Methamphetamine Consumption" by Hitzemann R, Iancu OD, et al. (2019),
-## to identify differentially expressed genes in mice bred for high and low methamphetamine consumption.
+## Description: This code implements the workflow for analyzing data from the
+## paper "Regional Analysis of the Brain Transcriptome in Mice Bred for High
+## and Low Methamphetamine Consumption" by Hitzemann R, Iancu OD, et al. (2019),
+## to identify differentially expressed genes in mice bred for high and low
+## methamphetamine consumption.
 
-## The code is divided into four main sections:
-## 1) Data loading and exploration
-## 2) Data cleaning
-## 3) Data analysis
-## 4) Data visualization.
+################################################################################
 
-
-# Section 1: Data loading and exploration
+# ==============================================================================
+# Section 1: Data loading and preprocessing
+# ==============================================================================
 
 ## Load the libraries
 library(recount3)
@@ -23,6 +23,7 @@ library(iSEE)
 library("edgeR")
 library("ggplot2")
 library("limma")
+library("pheatmap")
 
 ## Explore available mouse datasets in recount3
 mouse_projects <- available_projects("mouse")
@@ -67,25 +68,36 @@ summary(as.data.frame(colData(rse_gene_SRP193734)[
 ]))
 
 
-## CONTROL OF THE DATA QUALITY
-
-rse_gene_SRP193734$assigned_gene_prop <- rse_gene_SRP193734$recount_qc.gene_fc_count_all.assigned / rse_gene_SRP193734$recount_qc.gene_fc_count_all.total
-summary(rse_gene_SRP193734$assigned_gene_prop)
-with(colData(rse_gene_SRP193734), plot(assigned_gene_prop, sra_attribute.selected_line))
-with(colData(rse_gene_SRP193734), plot(assigned_gene_prop, sra_attribute.tissue))
+# ==============================================================================
+# Section 2: Quality control and data cleaning
+# ==============================================================================
 
 ## Save the original data just in case
 rse_gene_SRP193734_unfiltred <- rse_gene_SRP193734
 
+## Calculate the proportion of assigned genes
+rse_gene_SRP193734$assigned_gene_prop <- rse_gene_SRP193734$recount_qc.gene_fc_count_all.assigned /
+  rse_gene_SRP193734$recount_qc.gene_fc_count_all.total
+summary(rse_gene_SRP193734$assigned_gene_prop)
+
+## Visualize the relationship between the assigned gene proportion and the selected line and tissue
+#with(colData(rse_gene_SRP193734),
+#     plot(assigned_gene_prop, sra_attribute.selected_line))
+#with(colData(rse_gene_SRP193734),
+#    plot(assigned_gene_prop, sra_attribute.tissue))
+
 ## Check if there is a difference between the groups
-with(colData(rse_gene_SRP193734), tapply(assigned_gene_prop, sra_attribute.selected_line, sra_attribute.tissue, summary))
+with(colData(rse_gene_SRP193734), aggregate(assigned_gene_prop,
+                                            by = list(sra_attribute.selected_line, sra_attribute.tissue),
+                                            FUN = summary)
+     )
 
 ## Save only the data that pass the quality control
 hist(rse_gene_SRP193734$assigned_gene_prop)
 table(rse_gene_SRP193734$assigned_gene_prop < 0.3)
 ### ----------------------
 ### FALSE
-### 47
+### 143
 ### ----------------------
 
 rse_gene_SRP193734 <- rse_gene_SRP193734[, rse_gene_SRP193734$assigned_gene_prop > 0.3]
@@ -105,8 +117,11 @@ dim(rse_gene_SRP193734)
 round(nrow(rse_gene_SRP193734) / nrow(rse_gene_SRP193734_unfiltred) * 100, 2)
 
 
-## NORMALIZE MY DATA
+# ==============================================================================
+# Section 3: Normalization of the data
+# ==============================================================================
 
+## Normalize the data
 dge <- DGEList(
   counts = assay(rse_gene_SRP193734, "counts"),
   genes = rowData(rse_gene_SRP193734)
@@ -114,50 +129,77 @@ dge <- DGEList(
 
 dge <- calcNormFactors(dge)
 
-
-## Explore the data
-ggplot(
-  as.data.frame(colData(rse_gene_SRP193734)),
-  aes(y = assigned_gene_prop, x = sra_attribute.selected_line, fill = sra_attribute.selected_line)
-) +
+## Visualize the data after normalization
+ggplot(as.data.frame(colData(rse_gene_SRP193734)),
+       aes(x = sra_attribute.selected_line, y = assigned_gene_prop, fill = sra_attribute.tissue)) +
   geom_boxplot() +
-  theme_bw(base_size = 20) +
-  ylab("Assigned gene proportion") +
-  xlab("Selected line") +
-  ggtitle("Proportion of Assigned Reads by Selected Line") +
-  scale_fill_manual(values = c("High Drinker" = "red", "Low Drinker" = "blue"))
+  labs(x = "Mouse selected line", y = "Assigned gene proportion", fill = "Cerebral tissue") +
+  theme_minimal()
 
-## In case of error, we can use the following code to fix it
-dev.off()
+# ==============================================================================
+# Section 4: Differential expression analysis
+# ==============================================================================
 
 ## Implement the statistical model
 mod <- model.matrix(~ sra_attribute.selected_line + sra_attribute.tissue,
                     data = colData(rse_gene_SRP193734))
 colnames(mod)
 
-## Analysis of the data
+## Visualize the matrix
+vd <- ExploreModelMatrix::VisualizeDesign(
+  sampleData = colData(rse_gene_SRP193734),
+  designFormula = ~ sra_attribute.selected_line + sra_attribute.tissue,
+  textSizeFitted = 4
+)
 
+## Aply the voom transformation (to stabilize the variance)
 vGene <- voom(dge, mod, plot = TRUE)
 
+## Fit the linear model for each gene and perform the empirical Bayes moderation
 eb_result <- eBayes(lmFit(vGene))
 
+## Extract the results, sorting the genes without any particular order
 de_results <- topTable(
   eb_result,
   coef = 2,
   number = nrow(rse_gene_SRP193734),
   sort.by = "none"
 )
+
+## Inspect the dimensions and the first rows of the results
 dim(de_results)
 head(de_results)
 
-## Differential expression analysis
+## Count the genes with adjusted p-value < 0.05 (significant genes)
 table(de_results$adj.P.Val < 0.05)
 
-## Visualization of the results
+## Visualization of the changes in the differential expression
 plotMA(eb_result, coef = 2)
 
-## Volcano plot
+## Volcano plot highlighting the top 3 genes more significant
 volcanoplot(eb_result, coef = 2, highlight = 3, names = de_results$gene_name)
-#de_results[de_results$gene_name %in% ]...
+de_results[de_results$gene_name %in% c("Gm9855", "Arhgef15", "Gm1829"), ]
 
 
+# ==============================================================================
+# Section 5: Results interpretation and visualization
+# ==============================================================================
+
+## Extract the values of the genes of interest
+exprs_heatmap <- vGene$E[rank(de_results$adj.P.Val) <= 50, ]
+
+## Create a table with the information of the samples
+df <- as.data.frame(colData(rse_gene_SRP193734))
+
+# Subset the columns of interest
+df <- df[, c("sra_attribute.selected_line", "sra_attribute.tissue")]
+colnames(df) <- c("Selected line", "Tissue")
+
+## Create a heatmap with the expression values of the top 50 genes
+pheatmap(exprs_heatmap,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         show_rownames = FALSE,
+         show_colnames = FALSE,
+         annotation_col = df
+         )
