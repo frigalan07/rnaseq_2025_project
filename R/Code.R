@@ -14,7 +14,7 @@
 ################################################################################
 
 # ==============================================================================
-# Section 1: Data loading and preprocessing
+# Section 1: Data loading and pre-processing
 # ==============================================================================
 
 ## Load the libraries
@@ -72,9 +72,6 @@ summary(as.data.frame(colData(rse_gene_SRP193734)[
 # Section 2: Quality control and data cleaning
 # ==============================================================================
 
-## Save the original data just in case
-rse_gene_SRP193734_unfiltred <- rse_gene_SRP193734
-
 ## Calculate the proportion of assigned genes
 rse_gene_SRP193734$assigned_gene_prop <- rse_gene_SRP193734$recount_qc.gene_fc_count_all.assigned /
   rse_gene_SRP193734$recount_qc.gene_fc_count_all.total
@@ -103,7 +100,6 @@ table(rse_gene_SRP193734$assigned_gene_prop < 0.3)
 rse_gene_SRP193734 <- rse_gene_SRP193734[, rse_gene_SRP193734$assigned_gene_prop > 0.3]
 
 ## Calculate the expression levels of the genes ----- using the counts --------
-
 gene_means <- rowMeans(assay(rse_gene_SRP193734, "counts"))
 summary(gene_means)
 
@@ -182,7 +178,7 @@ de_results[de_results$gene_name %in% c("Gm9855", "Arhgef15", "Gm1829"), ]
 
 
 # ==============================================================================
-# Section 5: Results interpretation and visualization
+# Section 5: Visualization of the final results
 # ==============================================================================
 
 ## Extract the values of the genes of interest
@@ -203,3 +199,10 @@ pheatmap(exprs_heatmap,
          show_colnames = FALSE,
          annotation_col = df
          )
+
+
+# ==============================================================================
+# REPRODUCE THIS CODE
+# ==============================================================================
+options(width = 120)
+sessioninfo::session_info()
